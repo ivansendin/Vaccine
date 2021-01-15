@@ -1,7 +1,10 @@
 pragma solidity >=0.4.25 <0.6.0;
 
+import "./CoinFlippingPool.sol";
 
 contract Vaccine {
+
+using CoinFlippingPool for CoinFlippingPool.CoinFlippingPoolType;
 
 modifier onlyOwner {
     require(msg.sender == owner);
@@ -14,7 +17,7 @@ modifier onlyOwner {
  }
 
  modifier onlyPatient {
-    require( patients[msg.sender] !=0);
+    require( patientsShot[msg.sender] !=0);
   _;
  }
 
@@ -49,9 +52,12 @@ modifier onlyOwner {
   uint numberClinics;
   mapping (address => bool) clinics;
   mapping (address => bytes32[]) clinicVaccines;
+  mapping (address => CoinFlippingPool.CoinFlippingPoolType) clinicCoins;
+  mapping (address => address) patientClinic; //binds patients to clinics...
+
 
   uint numberPatients;
-  mapping (address => bytes32) patients;
+  mapping (address => bytes32) patientsShot;
   uint numberVaccines;
   VaccineShot[] vaccines;
   mapping (bytes32 => VaccineShot) vaccinesMap;
@@ -78,7 +84,11 @@ modifier onlyOwner {
   }
 
   function addClinic(address newClinic) public onlyOwner {
+
     clinics[newClinic] = true;
+    CoinFlippingPool.CoinFlippingPoolType memory pool;
+    clinicCoins[newClinic] = pool;
+
   }
 
 
@@ -92,9 +102,40 @@ modifier onlyOwner {
       clinicVaccines[clinic].push(commit);
   }
 
-  function vaccinate(address patient, bytes32 shot) public onlyClinic {
+  function vaccinateInit(address patient, bytes32 coinCommit) public onlyClinic {
+      clinicCoins[msg.sender].initFlipping(coinCommit,patient);
+      patientClinic[patient] = msg.sender;
+  }
+
+  // ajustar onlyPatient...
+  function vaccinatePatientJoin(bytes32 coinCommit) public {
+    clinicCoins[patientClinic[msg.sender]].joinFlipping(coinCommit,msg.sender);
+  }
+
+  function clinicRevealCoin(bytes32 nonce,byte v,address patient) public onlyClinic {
+    CoinFlippingPool.CoinFlippingPoolType storage t1 = clinicCoins[msg.sender];
+    t1.revealOwner(nonce,v,patient);
+    // clinicCoins[msg.sender].revealOwner(nonce,v,patient);
+  }
+
+  function patientRevealCoin(bytes32 nonce,byte v) public  {
+    clinicCoins[patientClinic[msg.sender]].revealOther(nonce,v,msg.sender);
+  }
+
+  function vaccinate(address patient) public onlyClinic {
+    require ( clinicCoins[msg.sender].isCorrect(patient));
+    uint16 random =  uint16(bytes2(clinicCoins[msg.sender].getValue(patient))) % uint16(clinicVaccines[msg.sender].length);
+
+    bytes32 shot  = clinicVaccines[msg.sender][random];
+    delete clinicVaccines[msg.sender][random];
+    patientsShot[patient] = shot;
+    vaccinesMap[shot].patient = patient;
+  }
+
+
+  function Xvaccinate(address patient, bytes32 shot) private {
     // verify VC owns the vaccine
-    patients[patient] = shot;
+    patientsShot[patient] = shot;
     vaccinesMap[shot].patient = patient;
 
   }
@@ -107,8 +148,8 @@ modifier onlyOwner {
 
   }
 
-  function gotSick() public onlyPatient {
-    VaccineShot memory vs = vaccinesMap[patients[msg.sender]];
+  function gotSick() public  {
+    VaccineShot memory vs = vaccinesMap[patientsShot[msg.sender]];
     require (vs.patient == msg.sender);
     require (vs.gotSick == false);
     vs.gotSick = true;
@@ -142,8 +183,8 @@ modifier onlyOwner {
     v=0x01;
     bytes32 ver = sha256(abi.encodePacked(nonce,v));
     if (ver==shot) {
-    control = control+1;
-    vaccinesMap[shot].vt = VaccineType.Control;
+      control++;
+      vaccinesMap[shot].vt = VaccineType.Control;
     }
   }
 
@@ -168,6 +209,8 @@ modifier onlyOwner {
     return approved;
   }
 
-
+  function gotVaccine(address p) public returns (bool) {
+    return true;
+  }
 
 }
